@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Union
 
 import boto3
@@ -61,7 +61,7 @@ class S3Load(BaseLoad):
             self.table = table
             self.full_table_name = self.table.schema + '.' + self.table.table_name
 
-    def upload_data_as_json(self):
+    def upload_data_as_json(self, days_delta: int = 0):
         session = boto3.session.Session()
         s3 = session.client(
             service_name='s3',
@@ -70,11 +70,12 @@ class S3Load(BaseLoad):
             aws_secret_access_key=config.get('s3', 'fs.s3a.secret.key')
         )
 
-        # TODO: extend it to allow custom date in filename
+        date_upload = datetime.now() + timedelta(days_delta)
+
         s3.put_object(
             Body=json.dumps(self.df),
             Bucket=config.get('s3', 'bucket_name'),
-            Key=f'raw/{self.table.schema}/{self.table.table_name}_{datetime.today().strftime("%Y-%m-%d")}.json'
+            Key=f'raw/{self.table.schema}/{self.table.table_name}_{date_upload.strftime("%Y-%m-%d")}.json'
         )
 
     def truncate_and_load(self, *args, **kwargs):

@@ -44,11 +44,11 @@ class BaseLoad(ABC):
         self.spark.sql(f"CREATE TABLE IF NOT EXISTS {self.full_table_name} ({schema})")
 
     @abstractmethod
-    def replace_by_snapshot(self, *args, **kwargs):
+    def truncate_and_load(self, *args, **kwargs):
         self.table_exists_assurance()
 
     @abstractmethod
-    def replace_by_period(self, *args, **kwargs):
+    def load_by_period(self, *args, **kwargs):
         self.table_exists_assurance()
 
 
@@ -82,7 +82,7 @@ class HiveLoad(BaseLoad):
     def __init__(self, df: DataFrame, table: Table, spark: SparkSession) -> None:
         super().__init__(df, table, spark)
 
-    def replace_by_snapshot(self, *args, **kwargs):
+    def truncate_and_load(self, *args, **kwargs):
         super().replace_by_snapshot()
 
         self.spark.sql(f"TRUNCATE TABLE {self.full_table_name}")
@@ -90,7 +90,7 @@ class HiveLoad(BaseLoad):
         self.df.createOrReplaceTempView(self.table.table_name)
         self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
-    def replace_by_period(self, *args, **kwargs):
+    def load_by_period(self, *args, **kwargs):
         pass
 
 
@@ -98,8 +98,8 @@ class ClickhouseLoad(BaseLoad):
     def __init__(self, df: DataFrame, table: Table, spark: SparkSession) -> None:
         super().__init__(df, table, spark)
 
-    def replace_by_snapshot(self, *args, **kwargs):
+    def truncate_and_load(self, *args, **kwargs):
         super().replace_by_snapshot()
 
-    def replace_by_period(self, *args, **kwargs):
+    def load_by_period(self, *args, **kwargs):
         pass

@@ -2,6 +2,8 @@ import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Optional, Union
+from enum import Enum
+from ..utils import Level
 
 import boto3
 # import clickhouse_connect
@@ -29,11 +31,14 @@ class Table:
 
 # TODO: add partitioned tables handling
 class BaseLoad(ABC):
-    def __init__(self,
-                 df: DataFrame,
-                 table: Table,
-                 spark: SparkSession
-                 ) -> None:
+    def __init__(
+            self,
+            level: Level,
+            df: DataFrame,
+            table: Table,
+            spark: SparkSession
+    ) -> None:
+        self.level = level
         self.df = df.withColumn('utc_upload_dttm', F.lit(str(datetime.now())))
         self.table = table
         self.full_table_name = self.table.schema + '.' + self.table.table_name
@@ -53,10 +58,17 @@ class BaseLoad(ABC):
 
 
 class S3Load(BaseLoad):
-    def __init__(self, df: Union[dict, DataFrame], table: Table, spark: Optional[SparkSession] = None) -> None:
+    def __init__(
+            self,
+            level: Level,
+            df: Union[dict, DataFrame],
+            table: Table,
+            spark: Optional[SparkSession] = None
+    ) -> None:
         if spark:
             super().__init__(df, table, spark)
         else:
+            self.level = level
             self.df = df
             self.table = table
             self.full_table_name = self.table.schema + '.' + self.table.table_name
@@ -75,7 +87,7 @@ class S3Load(BaseLoad):
         s3.put_object(
             Body=json.dumps(self.df),
             Bucket=config.get('s3', 'bucket_name'),
-            Key=f'raw/{self.table.schema}/{self.table.table_name}_{date_upload.strftime("%Y-%m-%d")}.json'
+            Key=f'{self.level.name}/{self.table.schema}/{self.table.table_name}_{date_upload.strftime("%Y-%m-%d")}.json'
         )
 
     def truncate_and_load(self, *args, **kwargs):
@@ -86,7 +98,7 @@ class S3Load(BaseLoad):
 
 
 class HiveLoad(BaseLoad):
-    def __init__(self, df: DataFrame, table: Table, spark: SparkSession) -> None:
+    def __init__(self, level: Level, df: DataFrame, table: Table, spark: SparkSession) -> None:
         super().__init__(df, table, spark)
 
     def truncate_and_load(self, *args, **kwargs):
@@ -102,7 +114,7 @@ class HiveLoad(BaseLoad):
 
 
 class ClickhouseLoad(BaseLoad):
-    def __init__(self, df: DataFrame, table: Table, spark: SparkSession) -> None:
+    def __init__(self, level: Level, df: DataFrame, table: Table, spark: SparkSession) -> None:
         super().__init__(df, table, spark)
 
     def truncate_and_load(self, *args, **kwargs):

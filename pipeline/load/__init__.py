@@ -52,7 +52,7 @@ class BaseLoad(ABC):
         self.table_exists_assurance()
 
 
-class S3Load(BaseLoad, ABC):
+class S3Load(BaseLoad):
     def __init__(self, df: Union[dict, DataFrame], table: Table, spark: Optional[SparkSession] = None) -> None:
         if spark:
             super().__init__(df, table, spark)
@@ -76,6 +76,12 @@ class S3Load(BaseLoad, ABC):
             Bucket=config.get('s3', 'bucket_name'),
             Key=f'raw/{self.table.schema}/{self.table.table_name}_{datetime.today().strftime("%Y-%m-%d")}.json'
         )
+
+    def truncate_and_load(self, *args, **kwargs):
+        super().replace_by_snapshot()
+
+    def load_by_period(self, *args, **kwargs):
+        pass
 
 
 class HiveLoad(BaseLoad):

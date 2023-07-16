@@ -46,7 +46,7 @@ class BaseLoad(ABC):
 
     def table_exists_assurance(self):
         schema = ', '.join(' '.join(x) for x in self.df.dtypes)
-        self.spark.sql(f"CREATE TABLE IF NOT EXISTS {self.full_table_name} ({schema})")
+        self.spark.sql(f"CREATE TABLE IF NOT EXISTS {self.full_table_name}.({schema})")
 
     @abstractmethod
     def truncate_and_load(self, *args, **kwargs):

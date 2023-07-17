@@ -39,14 +39,19 @@ class BaseLoad(ABC):
             spark: SparkSession
     ) -> None:
         self.level = level
-        self.df = df.withColumn('utc_upload_dttm', F.lit(str(datetime.now())))
+        upload_dttm = str(datetime.now())
+        self.df = (df
+                   .withColumn('utc_upload_dttm', F.current_timestamp())
+                    # for the partitioning
+                   .withColumn('upload_month', F.lit(upload_dttm[0:7]))
+        )
         self.table = table
-        self.full_table_name = self.table.schema + '.' + self.table.table_name
+        self.full_table_name = self.table.schema + '.' + level.name + '_' + self.table.table_name
         self.spark = spark
 
+    @abstractmethod
     def table_exists_assurance(self):
-        schema = ', '.join(' '.join(x) for x in self.df.dtypes)
-        self.spark.sql(f"CREATE TABLE IF NOT EXISTS {self.full_table_name}.({schema})")
+        pass
 
     @abstractmethod
     def truncate_and_load(self, *args, **kwargs):
@@ -66,7 +71,7 @@ class S3Load(BaseLoad):
             spark: Optional[SparkSession] = None
     ) -> None:
         if spark:
-            super().__init__(df, table, spark)
+            super().__init__(level, df, table, spark)
         else:
             self.level = level
             self.df = df
@@ -95,11 +100,23 @@ class S3Load(BaseLoad):
 
     def load_by_period(self, *args, **kwargs):
         pass
+    
+    def table_exists_assurance(self):
+        pass
 
 
 class HiveLoad(BaseLoad):
     def __init__(self, level: Level, df: DataFrame, table: Table, spark: SparkSession) -> None:
-        super().__init__(df, table, spark)
+        super().__init__(level, df, table, spark)
+    
+    def table_exists_assurance(self):
+        super(HiveLoad, self).table_exists_assurance()
+        schema = ', '.join(f"{x} {y}" for x, y in self.df.dtypes if x != 'upload_month')
+        self.spark.sql(
+            f"CREATE TABLE IF NOT EXISTS {self.full_table_name} ({schema}) "
+            f"PARTITIONED BY (upload_month STRING) "
+            f"STORED AS PARQUET"
+        )
 
     def truncate_and_load(self, *args, **kwargs):
         super().replace_by_snapshot()
@@ -109,8 +126,22 @@ class HiveLoad(BaseLoad):
         self.df.createOrReplaceTempView(self.table.table_name)
         self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
-    def load_by_period(self, *args, **kwargs):
-        pass
+    def load_by_period(self, periodic_column: str, *args, **kwargs):
+        super(HiveLoad, self).load_by_period()
+
+        self.df.createOrReplaceTempView(self.table.table_name)
+
+        period_start = self.spark.sql(f"SELECT MIN({periodic_column}) FROM {self.table.table_name}").collect()[0][0]
+        period_end = self.spark.sql(f"SELECT MAX({periodic_column}) FROM {self.table.table_name}").collect()[0][0]
+
+        self.spark.sql(
+            f"INSERT INTO {self.full_table_name} "
+            f"SELECT * FROM {self.full_table_name} "
+            f"WHERE {periodic_column} < '{period_start}' OR {periodic_column} > '{period_end}'"
+            # f"DELETE FROM {self.full_table_name} "
+            # f"WHERE {periodic_column} >= '{period_start}' AND {periodic_column} <= '{period_end}'"
+        )
+        self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
 
 class ClickhouseLoad(BaseLoad):
@@ -121,4 +152,5 @@ class ClickhouseLoad(BaseLoad):
         super().replace_by_snapshot()
 
     def load_by_period(self, *args, **kwargs):
-        pass
+        super(ClickhouseLoad, self).load_by_period()
+

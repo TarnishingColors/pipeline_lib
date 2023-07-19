@@ -69,11 +69,11 @@ class S3Extract(BaseExtract):
 
     # TODO: add handling other input formats (besides json)
     @date_filter
-    def extract(self, file_dir: str, start_date: datetime = None, end_date: datetime = None, *args, **kwargs) -> DataFrame:
+    def extract(self, start_date: datetime = None, end_date: datetime = None, *args, **kwargs) -> DataFrame:
         super().extract(start_date=self.start_date, end_date=self.end_date, *args, **kwargs)
-        df = self.spark.read.json(self.spark.sparkContext.parallelize(
+        df = self.spark.read.json(
             f"s3a://{config.get('s3', 'bucket_name')}/{kwargs['file_dir']}"
-        ))
+        )
         return df
 
 

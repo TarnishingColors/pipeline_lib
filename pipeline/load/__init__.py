@@ -21,9 +21,10 @@ config.read(config_path)
 
 
 class Table:
-    def __init__(self, schema: str, table_name: str):
+    def __init__(self, schema: str, table_name: str, periodic_column: str = None):
         self.schema = schema
         self.table_name = table_name
+        self.periodic_column = periodic_column
 
     def __str__(self):
         return f"{self.schema}.{self.table_name}"
@@ -39,13 +40,13 @@ class BaseLoad(ABC):
             spark: SparkSession
     ) -> None:
         self.level = level
-        upload_dttm = str(datetime.now())
-        self.df = (df
-                   .withColumn('utc_upload_dttm', F.current_timestamp())
-                    # for the partitioning
-                   .withColumn('upload_month', F.lit(upload_dttm[0:7]))
-        )
         self.table = table
+
+        upload_dttm = str(datetime.now())
+        self.df = df.withColumn('utc_upload_dttm', F.current_timestamp())
+        if self.table.periodic_column:
+            self.df = self.df.withColumn('partition_month', F.date_trunc('mm', F.col(self.table.periodic_column)))
+
         self.full_table_name = self.table.schema + '.' + level.name + '_' + self.table.table_name
         self.spark = spark
 
@@ -111,11 +112,14 @@ class HiveLoad(BaseLoad):
     
     def table_exists_assurance(self):
         super(HiveLoad, self).table_exists_assurance()
-        schema = ', '.join(f"{x} {y}" for x, y in self.df.dtypes if x != 'upload_month')
+        schema = ', '.join(f"{x} {y}" for x, y in self.df.dtypes if x != 'partition_month')
+        query = (
+                f"CREATE TABLE IF NOT EXISTS {self.full_table_name} ({schema}) "
+                + (f"PARTITIONED BY (partition_month STRING) " if self.table.periodic_column else "")
+                + f"STORED AS PARQUET"
+        )
         self.spark.sql(
-            f"CREATE TABLE IF NOT EXISTS {self.full_table_name} ({schema}) "
-            f"PARTITIONED BY (upload_month STRING) "
-            f"STORED AS PARQUET"
+            query
         )
 
     def truncate_and_load(self, *args, **kwargs):
@@ -126,20 +130,18 @@ class HiveLoad(BaseLoad):
         self.df.createOrReplaceTempView(self.table.table_name)
         self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
-    def load_by_period(self, periodic_column: str, *args, **kwargs):
+    def load_by_period(self, *args, **kwargs):
         super(HiveLoad, self).load_by_period()
 
         self.df.createOrReplaceTempView(self.table.table_name)
 
-        period_start = self.spark.sql(f"SELECT MIN({periodic_column}) FROM {self.table.table_name}").collect()[0][0]
-        period_end = self.spark.sql(f"SELECT MAX({periodic_column}) FROM {self.table.table_name}").collect()[0][0]
+        period_start = self.spark.sql(f"SELECT MIN({self.table.periodic_column}) FROM {self.table.table_name}").collect()[0][0]
+        period_end = self.spark.sql(f"SELECT MAX({self.table.periodic_column}) FROM {self.table.table_name}").collect()[0][0]
 
         self.spark.sql(
             f"INSERT INTO {self.full_table_name} "
             f"SELECT * FROM {self.full_table_name} "
-            f"WHERE {periodic_column} < '{period_start}' OR {periodic_column} > '{period_end}'"
-            # f"DELETE FROM {self.full_table_name} "
-            # f"WHERE {periodic_column} >= '{period_start}' AND {periodic_column} <= '{period_end}'"
+            f"WHERE {self.table.periodic_column} < '{period_start}' OR {self.table.periodic_column} > '{period_end}'"
         )
         self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
@@ -153,4 +155,3 @@ class ClickhouseLoad(BaseLoad):
 
     def load_by_period(self, *args, **kwargs):
         super(ClickhouseLoad, self).load_by_period()
-

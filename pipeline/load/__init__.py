@@ -42,8 +42,8 @@ class BaseLoad(ABC):
         self.level = level
         self.table = table
 
-        upload_dttm = str(datetime.now())
-        self.df = df.withColumn('utc_upload_dttm', F.current_timestamp())
+        utc_upload_dttm = str(datetime.now())
+        self.df = df.withColumn('utc_upload_dttm', F.to_timestamp(F.lit(utc_upload_dttm)))
         if self.table.periodic_column:
             self.df = self.df.withColumn('partition_month', F.date_trunc('mm', F.col(self.table.periodic_column)))
 
@@ -139,11 +139,14 @@ class HiveLoad(BaseLoad):
         period_end = self.spark.sql(f"SELECT MAX({self.table.periodic_column}) FROM {self.table.table_name}").collect()[0][0]
 
         self.spark.sql(
-            f"INSERT INTO {self.full_table_name} "
+            f"INSERT OVERWRITE TABLE {self.full_table_name} "
+            f"SELECT DISTINCT * FROM ("
             f"SELECT * FROM {self.full_table_name} "
-            f"WHERE {self.table.periodic_column} < '{period_start}' OR {self.table.periodic_column} > '{period_end}'"
+            f"WHERE {self.table.periodic_column} < '{period_start}' OR {self.table.periodic_column} > '{period_end}' "
+            f"UNION "
+            f"SELECT * FROM {self.table.table_name}"
+            f") AS t"
         )
-        self.spark.sql(f"INSERT INTO TABLE {self.full_table_name} SELECT * FROM {self.table.table_name}")
 
 
 class ClickhouseLoad(BaseLoad):

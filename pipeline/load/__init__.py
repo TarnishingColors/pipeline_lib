@@ -1,9 +1,10 @@
 import json
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Union
 from enum import Enum
 from ..utils import Level
+from ..utils.date import *
 
 import boto3
 # import clickhouse_connect
@@ -138,11 +139,16 @@ class HiveLoad(BaseLoad):
         period_start = self.spark.sql(f"SELECT MIN({self.table.periodic_column}) FROM {self.table.table_name}").collect()[0][0]
         period_end = self.spark.sql(f"SELECT MAX({self.table.periodic_column}) FROM {self.table.table_name}").collect()[0][0]
 
+        period_start_month_first_date = get_first_date_of_current_month(period_start)
+        period_end_month_last_date = get_last_date_of_current_month(period_end)
+
         self.spark.sql(
             f"INSERT OVERWRITE TABLE {self.full_table_name} "
             f"SELECT DISTINCT * FROM ("
             f"SELECT * FROM {self.full_table_name} "
-            f"WHERE {self.table.periodic_column} < '{period_start}' OR {self.table.periodic_column} > '{period_end}' "
+            f"WHERE ({self.table.periodic_column} >= '{period_start_month_first_date}' AND {self.table.periodic_column} < '{period_start}')"
+            f" OR "
+            f"({self.table.periodic_column} > '{period_end}' AND {self.table.periodic_column} <= '{period_end_month_last_date}') "
             f"UNION "
             f"SELECT * FROM {self.table.table_name}"
             f") AS t"
